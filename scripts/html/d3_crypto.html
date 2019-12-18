@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+
+<!-- Load d3.js -->
+<script src="https://d3js.org/d3.v4.js"></script>
+<script src = "https://d3js.org/d3-request.v1.min.js"></script>
+<style>
+
+    .focus {
+        opacity: 0.7;
+    }
+
+    .focus circle {
+        fill: none;
+        stroke: black;
+    }
+
+    .focus line {
+        fill: none;
+        stroke: black;
+        stroke-width: 1.5;
+        stroke-dasharray: 3.3;
+    }
+
+    .dates {
+        border: .5px solid #c3c3c3;
+        display: -webkit-flex;
+        display: flex;
+        -webkit-flex-wrap: wrap;
+        flex-wrap: wrap;
+        -webkit-align-content: center;
+        align-content: center;
+        justify-content: space-between;
+        margin-left: 60px;
+        max-width: 620px;
+    }
+
+    #from_date {
+        padding-left: 15px;
+    }
+
+    #to_date {
+        padding-right: 15px;
+    }
+
+    .line {
+        fill: none;
+        stroke: steelblue;
+        stroke-width: 2;
+    }
+
+    .overlay {
+        fill: none;
+        pointer-events: all;
+    }
+
+    #x_axis_text, #y_axis_text, #title_text {
+        font-size: 20px;
+        fill: #411C14;
+    }
+
+    .x_axis .tick {
+        font-size: 0.65em;
+    }
+
+</style>
+<!-- Create a div where the graph will take place -->
+<div id="my_dataviz">
+    <svg>
+        <text contentEditable="true"  >
+            <div xmlns="http://www.w3.org/1999/xhtml" class="dates">
+                <p id="from_date">From:
+                    <input type = "date"
+                           id="start_date"
+                           name="graph-start"
+                           value="2013-04-28"
+                           min = "2013-04-28"
+                           max="2017-11-22"
+                           required pattern="\d{4}-\d{2}-\d{2}">
+                    </input>
+                </p>
+                <p id="to_date">To:
+                    <input type = "date"
+                           id="end_date"
+                           name="graph-end"
+                           value="2017-11-22"
+                           min = "2013-04-28"
+                           max="2017-11-22"
+                           required pattern="\d{2}-\d{2}-\d{4}">
+
+                    </input>
+                </p>
+            </div>
+        </text>
+    </svg>
+</div>
+
+<script>
+let init_data = {};
+
+const margin = {top: 10, right: 60, bottom: 50, left: 60},
+    width = 720 - margin.left - margin.right,
+    height = 400 - margin.top - margin.bottom;
+
+let x = d3.scaleTime().range([ 0, width ]);
+let y = d3.scaleLinear().range([ height, 0 ]);
+let xAxis = d3.axisBottom(x);
+let xAxisForm = xAxis.ticks(10).tickFormat(d3.timeFormat("%Y-%b"));
+
+
+const bisectDate = d3.bisector(d => d.Date).right;
+const formatValue = d3.format(".4n");
+const formatCurrency = d => `$${formatValue(d)}`;
+const parseTime = d3.timeParse('%d/%m/%Y');
+const parseDash = d3.timeParse("%Y-%m-%d");
+
+const svg = d3.select("#my_dataviz").select("svg")
+    .attr("width", width + margin.left + margin.right)
+    .attr("height", height + margin.top + margin.bottom)
+    .append("g")
+    .attr("transform", "translate(" + margin.left + "," + margin.top + ")").attr("class", "g_class");
+
+const focus = svg.append('g').attr('class', 'focus').style('display', 'none');
+
+const text_x = d3.select(".g_class").append("text").attr("id", "x_axis_text");
+const text_y = d3.select(".g_class").append("text").attr("id", "y_axis_text");;
+const text_title = d3.select(".g_class").append("text").attr("id", "title_text");;
+
+let valueline = d3.line().x(function(d) { return x(d.Date); }).y(function(d) { return y(d.Close); });
+
+function readData(a, b) {
+    d3.csv("bitcoin_historical_data.csv", sf, (error, data) => {
+
+        if (error) throw error;
+
+        sortData(data);
+        setAxes();
+        setText();
+        setPath();
+        setFocus()
+        checkInput();
+    })
+};
+
+function sf(d) {
+    d.Date = parseTime(d.Date).getTime();
+    d.Close = +d.Close;
+    return d;
+};
+
+function sortData(data) {
+    init_data = data.sort((a, b) => a.Date - b.Date);
+};
+
+function checkInput() {
+    d3.selectAll("#start_date").on("input", function() {
+        updateStartTime(this.value);
+    });
+    d3.selectAll("#end_date").on("input", function() {
+        updateEndTime(this.value);
+    });
+};
+
+function setAxes() {
+     setAxisX();
+     setAxisY();
+};
+
+function setAxisX() {
+     x.domain(d3.extent(init_data, function(d) { return d.Date; }));
+     svg.append("g").attr("class", "x_axis").attr("transform", "translate(0," + height + ")")
+        .call(xAxisForm);
+};
+
+function setAxisY() {
+     y.domain([0, d3.max(init_data, function(d) { return +d.Close; })])
+
+     svg.append("g").attr("class", "y_axis").call(d3.axisLeft(y));
+};
+
+function setFocus() {
+     focus.append('circle').attr('r', 4.5);
+     focus.append('line').classed('x', true);
+     focus.append('line').classed('y', true);
+     focus.append('text').attr('x', 9).attr('dy', '.35em');
+
+     setFocusRectangle();
+};
+
+function setFocusRectangle() {
+     svg.append('rect')
+        .attr('class', 'overlay')
+        .attr('width', width)
+        .attr('height', height)
+        .on('mouseover', () => focus.style('display', null))
+        .on('mouseout', () => focus.style('display', 'none'))
+        .on('mousemove', mousemove);
+};
+
+function mousemove() {
+     const x0 = x.invert(d3.mouse(this)[0]);
+     const i = bisectDate(init_data, x0, 1);
+     const d0 = init_data[i - 1];
+     const d1 = init_data[i];
+     const d = x0 - d0.Date > d1.Date - x0 ? d1 : d0;
+
+     setCanvas(d);
+};
+
+function setCanvas(d) {
+     focus.attr('transform', `translate(${x(d.Date)}, ${y(d.Close)})`);
+     setCanvasXLine(d);
+     setCanvasYLine(d);
+     setCurrFormat(d);
+};
+
+function setCanvasXLine(d) {
+     focus.select('line.x').attr('x1', 0).attr('x2', -x(d.Date)).attr('y1', 0).attr('y2', 0);
+};;
+
+function setCanvasYLine(d) {
+     focus.select('line.y').attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', height - y(d.Close));
+};
+
+function setCurrFormat(d) {
+     focus.select('text').text(formatCurrency(d.Close));
+};
+
+function setPath() {
+     svg.append("path")
+        .datum(init_data)
+        .attr("class", "line")
+        .attr("d", valueline(init_data));
+};
+
+function setText() {
+
+     text_x.attr("x", width - margin.right).attr("y", height + margin.bottom).text("Time");
+
+        text_y.attr("x", -height/1.75).attr("y", -45).text("Price (USD)").attr("transform", "rotate("+(-90)+")");
+
+        text_title.attr("x", width/2).attr("y", margin.top).text("Bitcoin Values (2013 to 2017)").attr("text-anchor", "middle");
+
+};
+
+function updateStartTime(val) {
+
+        let index = 0;
+        var higherVals = [];
+        var el = new Date(parseDash(val)).getTime();
+
+                for(let i = 0; i <= init_data.length; i++) {
+                    if(init_data[i].Date === el) {
+                        index = i;
+                        break;
+                    }
+                    else {
+                        continue;
+                     }
+                };
+                // add the values b/t start date and end to added array
+                higherVals = init_data.slice(index, init_data.length - 1);
+
+
+
+        x.domain([init_data[index].Date, init_data[init_data.length - 1].Date]);
+
+        var t = d3.select("svg").transition().duration(1000).ease(d3.easeSin);
+        t.select(".x_axis").call(xAxis);
+        t.select(".line").attr("d", valueline(higherVals));
+};
+
+function updateEndTime(val) {
+        let index = 0;
+        var lesserVals = [];
+        var el = new Date(parseDash(val)).getTime();
+
+                for(let i = 0; i <= init_data.length; i++) {
+                    if(init_data[i].Date === el) {
+                        index = i;
+                        break;
+                    }
+                    else {
+                        continue;
+                     }
+                };
+                // add the values b/t start date and end to added array
+                lesserVals = init_data.slice(0, index);
+
+
+
+        x.domain([init_data[0].Date, init_data[index].Date]);
+
+        var t = d3.select("svg").transition().duration(1000).ease(d3.easeLinear);
+        t.select(".x_axis").call(xAxis);
+        t.select(".line").attr("d", valueline(lesserVals));
+}
+
+function main() {
+    readData(null, null);
+};
+
+main();
+</script>
